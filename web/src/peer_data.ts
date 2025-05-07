@@ -61,10 +61,10 @@ export async function maybe_fetch_stream_subscribers(stream_id: number): Promise
     const subscribers_promise = (async () => {
         let subscribers: number[];
         try {
-            const xhr = await channel.get({
+            const result = await channel.get({
                 url: `/json/streams/${stream_id}/members`,
             });
-            subscribers = fetch_stream_subscribers_response_schema.parse(await xhr).subscribers;
+            subscribers = fetch_stream_subscribers_response_schema.parse(result).subscribers;
         } catch {
             blueslip.error("Failure fetching channel subscribers", {
                 stream_id,
@@ -135,9 +135,18 @@ async function get_full_subscriber_set(
     return get_loaded_subscriber_subset(stream_id);
 }
 
-export function is_subscriber_subset(stream_id1: number, stream_id2: number): boolean {
-    const sub1_set = get_loaded_subscriber_subset(stream_id1);
-    const sub2_set = get_loaded_subscriber_subset(stream_id2);
+export async function is_subscriber_subset(
+    stream_id1: number,
+    stream_id2: number,
+): Promise<boolean | null> {
+    const sub1_promise = get_full_subscriber_set(stream_id1, false);
+    const sub2_promise = get_full_subscriber_set(stream_id2, false);
+    const sub1_set = await sub1_promise;
+    const sub2_set = await sub2_promise;
+    // This happens if we encountered an error feteching subscribers.
+    if (sub1_set === null || sub2_set === null) {
+        return null;
+    }
 
     return [...sub1_set.keys()].every((key) => sub2_set.has(key));
 }

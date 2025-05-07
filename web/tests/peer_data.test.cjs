@@ -115,7 +115,7 @@ test("unsubscribe", () => {
     assert.ok(!sub.subscribed);
 });
 
-test("subscribers", () => {
+test("subscribers", async () => {
     const sub = {
         name: "Rome",
         subscribed: true,
@@ -225,6 +225,18 @@ test("subscribers", () => {
     assert.ok(!stream_data.is_user_subscribed(stream_id, brutus.user_id));
     peer_data.remove_subscriber(stream_id, brutus.user_id);
     assert.ok(!stream_data.is_user_subscribed(stream_id, brutus.user_id));
+    blueslip.reset();
+
+    // Same test but for `maybe_fetch_is_user_subscribed`
+    blueslip.expect(
+        "warn",
+        "We got a maybe_fetch_is_user_subscribed call for a non-existent or inaccessible stream.",
+        2,
+    );
+    peer_data.add_subscriber(stream_id, brutus.user_id);
+    assert.ok(!(await stream_data.maybe_fetch_is_user_subscribed(stream_id, brutus.user_id)));
+    peer_data.remove_subscriber(stream_id, brutus.user_id);
+    assert.ok(!(await stream_data.maybe_fetch_is_user_subscribed(stream_id, brutus.user_id)));
     blueslip.reset();
 
     // Verify that we don't crash for a bad stream.
@@ -371,7 +383,7 @@ test("get_subscriber_count", () => {
     assert.deepStrictEqual(peer_data.get_subscriber_count(india.stream_id, false), 1);
 });
 
-test("is_subscriber_subset", () => {
+test("is_subscriber_subset", async () => {
     function make_sub(stream_id, user_ids) {
         const sub = {
             stream_id,
@@ -399,7 +411,10 @@ test("is_subscriber_subset", () => {
     ];
 
     for (const row of matrix) {
-        assert.equal(peer_data.is_subscriber_subset(row[0].stream_id, row[1].stream_id), row[2]);
+        assert.equal(
+            await peer_data.is_subscriber_subset(row[0].stream_id, row[1].stream_id),
+            row[2],
+        );
     }
 
     // Two untracked streams should never be passed into us.
@@ -411,7 +426,7 @@ test("is_subscriber_subset", () => {
         "warn",
         "We called get_loaded_subscriber_subset for an untracked stream: 99999",
     );
-    peer_data.is_subscriber_subset(99999, 88888);
+    await peer_data.is_subscriber_subset(99999, 88888);
     blueslip.reset();
 
     // Warn about hypothetical undefined stream_ids.
@@ -419,8 +434,17 @@ test("is_subscriber_subset", () => {
         "warn",
         "We called get_loaded_subscriber_subset for an untracked stream: undefined",
     );
-    peer_data.is_subscriber_subset(undefined, sub_a.stream_id);
+    await peer_data.is_subscriber_subset(undefined, sub_a.stream_id);
     blueslip.reset();
+
+    // Errors when fetching subscriber data return `null`
+    channel.get = () => {
+        throw new Error("error");
+    };
+    peer_data.clear_for_testing();
+    // Expect two calls, one for each channel
+    blueslip.expect("error", "Failure fetching channel subscribers", 2);
+    assert.equal(await peer_data.is_subscriber_subset(sub_a.stream_id, sub_b.stream_id), null);
 });
 
 test("get_unique_subscriber_count_for_streams", () => {
